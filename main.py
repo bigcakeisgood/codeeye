@@ -57,6 +57,13 @@ class VideoLabel(QLabel):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        # Explicitly request a normal decorated top-level window on Linux desktops.
+        self.setWindowFlags(
+            Qt.WindowType.Window
+            | Qt.WindowType.WindowMinimizeButtonHint
+            | Qt.WindowType.WindowMaximizeButtonHint
+            | Qt.WindowType.WindowCloseButtonHint
+        )
         self.setWindowTitle("CodeEye — Scan & Generate")
         self.resize(1120, 760)
         self.cap = None
