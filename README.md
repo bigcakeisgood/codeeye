@@ -29,6 +29,32 @@ python main.py
 
 Grant camera permission to your terminal/Python application if prompted. If the camera does not open, try another device in the camera dropdown.
 
+## Build a Linux executable with Nuitka
+
+Build on the Linux distribution/architecture you intend to target. A Linux binary built on one system is not guaranteed to run on every other distribution.
+
+Install system build tools first (Debian/Ubuntu example):
+
+```bash
+sudo apt update
+sudo apt install -y python3-venv python3-dev build-essential patchelf
+```
+
+Then run the build script from the repository root. It creates/uses `.venv`, installs the app requirements and Nuitka inside that environment, and builds a standalone distribution:
+
+```bash
+chmod +x build_linux.sh
+./build_linux.sh
+```
+
+The build output is placed under `dist/` (normally `dist/main.dist/`). Launch the executable from its output directory so bundled Qt and library files remain alongside it:
+
+```bash
+./dist/main.dist/CodeEye
+```
+
+If the executable has a different name, check the contents of `dist/`. The standalone output is a directory containing the executable and required runtime files; distribute the whole directory, not just the executable. Test webcam permissions and scanning on the target machine. This script has been added to the repository, but its output has not been built or runtime-tested in this environment.
+
 ## Notes
 
 - QR error correction levels are L (about 7%), M (15%), Q (25%), and H (30%). Linear barcode formats have their own symbology rules.
