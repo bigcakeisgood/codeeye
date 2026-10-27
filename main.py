@@ -108,6 +108,30 @@ class MainWindow(QMainWindow):
         self.status = QLabel("Camera stopped")
         self.status.setStyleSheet("color:#64748b;")
         header.addWidget(self.status)
+
+        # In-app window controls remain visible even if a Linux window manager
+        # or Wayland session does not draw native title-bar buttons.
+        self.minimize_btn = QPushButton("—")
+        self.minimize_btn.setToolTip("Minimize")
+        self.minimize_btn.setFixedSize(34, 30)
+        self.minimize_btn.clicked.connect(self.showMinimized)
+        self.maximize_btn = QPushButton("□")
+        self.maximize_btn.setToolTip("Maximize / restore")
+        self.maximize_btn.setFixedSize(34, 30)
+        self.maximize_btn.clicked.connect(self.toggle_maximize)
+        self.close_btn = QPushButton("×")
+        self.close_btn.setToolTip("Close")
+        self.close_btn.setFixedSize(34, 30)
+        self.close_btn.setStyleSheet(
+            "QPushButton { background:#dc2626; color:white; border:0; "
+            "border-radius:6px; padding:3px; font-size:18px; } "
+            "QPushButton:hover { background:#b91c1c; }"
+        )
+        self.close_btn.clicked.connect(self.close)
+        header.addSpacing(12)
+        header.addWidget(self.minimize_btn)
+        header.addWidget(self.maximize_btn)
+        header.addWidget(self.close_btn)
         outer.addLayout(header)
 
         self.tabs = QTabWidget()
@@ -116,6 +140,16 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.make_generator_tab(), "▦  Generate")
         self.tabs.addTab(self.make_history_tab(), "◷  History")
         self.setCentralWidget(root)
+
+    def toggle_maximize(self):
+        if self.isMaximized():
+            self.showNormal()
+            self.maximize_btn.setText("□")
+            self.maximize_btn.setToolTip("Maximize")
+        else:
+            self.showMaximized()
+            self.maximize_btn.setText("❐")
+            self.maximize_btn.setToolTip("Restore")
 
     def make_scanner_tab(self):
         tab = QWidget()
