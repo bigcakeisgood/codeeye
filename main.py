@@ -50,7 +50,8 @@ class VideoLabel(QLabel):
             self.roi_rect = rect if rect.width() > 12 and rect.height() > 12 else None
             self.rubber.hide()
             self.origin = None
-            self.parent().parent().roi_changed()
+            if hasattr(self, "parent_window"):
+                self.parent_window.roi_changed()
 
 
 class MainWindow(QMainWindow):
@@ -116,7 +117,6 @@ class MainWindow(QMainWindow):
         self.video = VideoLabel(self)
         # The label's parent chain is not used for ROI handling; connect through a callback.
         self.video.parent_window = self
-        self.video.mouseReleaseEvent = self.video_release
         left.addWidget(self.video, 1)
         buttons = QHBoxLayout()
         self.start_btn = QPushButton("Start camera")
