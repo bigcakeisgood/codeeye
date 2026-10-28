@@ -20,7 +20,9 @@ from PyQt6.QtWidgets import (
 
 APP_DIR = Path.home() / ".codeeye"
 HISTORY_FILE = APP_DIR / "history.json"
+SETTINGS_FILE = APP_DIR / "settings.json"
 APP_DIR.mkdir(parents=True, exist_ok=True)
+MAX_TEXT_FILE_BYTES = 1 * 1024 * 1024  # 1 MiB import guard
 
 
 class VideoLabel(QLabel):
@@ -73,25 +75,12 @@ class MainWindow(QMainWindow):
         self.zoom = 1.0
         self.roi = None
         self.seen = set()
+        self.settings = self.load_settings()
+        self.history_enabled = self.settings.get("history_enabled", True)
         self.history = self.load_history()
         self.build_ui()
+        self.apply_theme()
         self.refresh_history()
-        self.setStyleSheet("""
-            QMainWindow,QWidget { background:#f5f7fb; color:#172033; font-size:13px; }
-            QGroupBox { border:1px solid #dbe2ee; border-radius:10px; margin-top:12px;
-                        padding:12px; font-weight:600; }
-            QGroupBox::title { subcontrol-origin:margin; left:12px; padding:0 5px; }
-            QPushButton { background:#315efb; color:white; border:0; border-radius:7px;
-                          padding:9px 13px; font-weight:600; }
-            QPushButton:hover { background:#2449ce; }
-            QPushButton:disabled { background:#9ca8c2; }
-            QLineEdit,QTextEdit,QComboBox,QSpinBox,QListWidget {
-                background:white; border:1px solid #d6deeb; border-radius:6px; padding:7px;
-            }
-            QTabWidget::pane { border:1px solid #dbe2ee; border-radius:9px; }
-            QTabBar::tab { padding:10px 18px; background:#e9edf5; border-radius:6px; }
-            QTabBar::tab:selected { background:#315efb; color:white; }
-        """)
 
     def build_ui(self):
         root = QWidget()
@@ -132,13 +121,19 @@ class MainWindow(QMainWindow):
         header.addWidget(self.minimize_btn)
         header.addWidget(self.maximize_btn)
         header.addWidget(self.close_btn)
+        self.secondary_controls = [self.minimize_btn, self.maximize_btn, self.close_btn]
+        for control in self.secondary_controls:
+            control.setVisible(self.settings.get("secondary_controls", True))
         outer.addLayout(header)
 
         self.tabs = QTabWidget()
         outer.addWidget(self.tabs)
         self.tabs.addTab(self.make_scanner_tab(), "⌕  Scan")
         self.tabs.addTab(self.make_generator_tab(), "▦  Generate")
-        self.tabs.addTab(self.make_history_tab(), "◷  History")
+        self.history_tab = self.make_history_tab()
+        self.tabs.addTab(self.history_tab, "◷  History")
+        self.tabs.addTab(self.make_settings_tab(), "⚙  Settings")
+        self.tabs.setTabVisible(2, self.history_enabled)
         self.setCentralWidget(root)
 
     def toggle_maximize(self):
@@ -219,9 +214,19 @@ class MainWindow(QMainWindow):
         self.gen_format = QComboBox()
         self.gen_format.addItems(["QR Code", "Code 128", "Code 39", "EAN-13", "EAN-8", "ITF"])
         form.addRow("Format", self.gen_format)
-        self.gen_text = QLineEdit()
-        self.gen_text.setPlaceholderText("Enter text, URL, or code data")
+        self.gen_text = QTextEdit()
+        self.gen_text.setPlaceholderText("Enter text, URL, or code data — or load a .txt file below")
+        self.gen_text.setMinimumHeight(95)
+        self.gen_text.textChanged.connect(self.update_input_count)
         form.addRow("Content", self.gen_text)
+        file_row = QHBoxLayout()
+        load_text = QPushButton("Load text file…")
+        load_text.clicked.connect(self.load_generator_file)
+        file_row.addWidget(load_text)
+        self.input_count = QLabel("0 characters")
+        self.input_count.setStyleSheet("color:#64748b;")
+        file_row.addWidget(self.input_count)
+        form.addRow("Text file", file_row)
         self.ec_level = QComboBox()
         self.ec_level.addItems(["L — 7%", "M — 15%", "Q — 25%", "H — 30%"])
         form.addRow("QR error correction", self.ec_level)
@@ -246,7 +251,12 @@ class MainWindow(QMainWindow):
         save.clicked.connect(self.save_generated)
         controls.addWidget(save)
         controls.addStretch()
-        note = QLabel("QR codes support L / M / Q / H correction. Linear barcode formats use python-barcode.")
+        note = QLabel(
+            "QR capacity depends on content and error correction (up to about 7,089 digits, "
+            "4,296 alphanumeric characters, or 2,953 bytes at level L). Unicode and mixed text "
+            "often fit less. Imported .txt files are limited to 1 MiB; the selected code format "
+            "may have a much smaller capacity. If generation fails, shorten the content."
+        )
         note.setWordWrap(True)
         note.setStyleSheet("color:#64748b;")
         controls.addWidget(note)
@@ -273,6 +283,154 @@ class MainWindow(QMainWindow):
         self.history_list.itemDoubleClicked.connect(self.copy_history_item)
         layout.addWidget(self.history_list)
         return tab
+
+    def make_settings_tab(self):
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        appearance = QGroupBox("Appearance")
+        appearance_form = QFormLayout(appearance)
+        self.theme_select = QComboBox()
+        self.theme_select.addItems(["Follow system", "Light", "Dark"])
+        self.theme_select.setCurrentText(self.settings.get("theme", "Follow system"))
+        self.theme_select.currentTextChanged.connect(self.on_theme_changed)
+        appearance_form.addRow("Color theme", self.theme_select)
+        layout.addWidget(appearance)
+
+        window_group = QGroupBox("Window controls")
+        window_layout = QVBoxLayout(window_group)
+        self.secondary_controls_check = QCheckBox(
+            "Show secondary minimize / maximize-restore / close buttons inside CodeEye"
+        )
+        self.secondary_controls_check.setChecked(self.settings.get("secondary_controls", True))
+        self.secondary_controls_check.toggled.connect(self.set_secondary_controls)
+        window_layout.addWidget(self.secondary_controls_check)
+        hint = QLabel(
+            "Use these in-app buttons if your desktop/window manager does not show the normal "
+            "title-bar controls. Turn them off when native controls are visible."
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color:#64748b;")
+        window_layout.addWidget(hint)
+        layout.addWidget(window_group)
+
+        data_group = QGroupBox("Local history")
+        data_layout = QVBoxLayout(data_group)
+        self.history_enabled_check = QCheckBox("Enable scan and generation history")
+        self.history_enabled_check.setChecked(self.history_enabled)
+        self.history_enabled_check.toggled.connect(self.set_history_enabled)
+        data_layout.addWidget(self.history_enabled_check)
+        history_note = QLabel(
+            "When disabled, new scans and generated codes are not saved to history. Existing "
+            "history stays on this computer and becomes available again if history is re-enabled. "
+            "Use Clear history to delete saved entries."
+        )
+        history_note.setWordWrap(True)
+        history_note.setStyleSheet("color:#64748b;")
+        data_layout.addWidget(history_note)
+        layout.addWidget(data_group)
+        layout.addStretch()
+        return tab
+
+    def load_settings(self):
+        try:
+            data = json.loads(SETTINGS_FILE.read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def save_settings(self):
+        try:
+            SETTINGS_FILE.write_text(json.dumps(self.settings, indent=2), encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(self, "Settings not saved", str(exc))
+
+    def apply_theme(self):
+        selected = self.settings.get("theme", "Follow system")
+        dark = selected == "Dark"
+        if selected == "Follow system":
+            try:
+                dark = QApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
+            except (AttributeError, TypeError):
+                dark = False
+        if dark:
+            self.setStyleSheet("""
+                QMainWindow,QWidget { background:#171b26; color:#e5e7eb; font-size:13px; }
+                QGroupBox { border:1px solid #374151; border-radius:10px; margin-top:12px; padding:12px; font-weight:600; }
+                QGroupBox::title { subcontrol-origin:margin; left:12px; padding:0 5px; }
+                QPushButton { background:#3b63dd; color:white; border:0; border-radius:7px; padding:9px 13px; font-weight:600; }
+                QPushButton:hover { background:#5278f0; }
+                QPushButton:disabled { background:#4b5563; }
+                QLineEdit,QTextEdit,QComboBox,QSpinBox,QListWidget { background:#222938; color:#f3f4f6; border:1px solid #465064; border-radius:6px; padding:7px; }
+                QTabWidget::pane { border:1px solid #374151; border-radius:9px; }
+                QTabBar::tab { padding:10px 18px; background:#262d3b; color:#e5e7eb; border-radius:6px; }
+                QTabBar::tab:selected { background:#3b63dd; color:white; }
+            """)
+            self.video.setStyleSheet("background:#090d15;color:#9ca3af;border-radius:12px;")
+            self.generated_preview.setStyleSheet("background:#222938;border:1px dashed #465064;border-radius:12px;")
+            self.flash_panel.setStyleSheet("background:#66551c;color:#fff0ad;border-radius:8px;font-weight:800;")
+        else:
+            self.setStyleSheet("""
+                QMainWindow,QWidget { background:#f5f7fb; color:#172033; font-size:13px; }
+                QGroupBox { border:1px solid #dbe2ee; border-radius:10px; margin-top:12px; padding:12px; font-weight:600; }
+                QGroupBox::title { subcontrol-origin:margin; left:12px; padding:0 5px; }
+                QPushButton { background:#315efb; color:white; border:0; border-radius:7px; padding:9px 13px; font-weight:600; }
+                QPushButton:hover { background:#2449ce; }
+                QPushButton:disabled { background:#9ca8c2; }
+                QLineEdit,QTextEdit,QComboBox,QSpinBox,QListWidget { background:white; color:#172033; border:1px solid #d6deeb; border-radius:6px; padding:7px; }
+                QTabWidget::pane { border:1px solid #dbe2ee; border-radius:9px; }
+                QTabBar::tab { padding:10px 18px; background:#e9edf5; color:#172033; border-radius:6px; }
+                QTabBar::tab:selected { background:#315efb; color:white; }
+            """)
+            self.video.setStyleSheet("background:#111827;color:#9ca3af;border-radius:12px;")
+            self.generated_preview.setStyleSheet("background:white;border:1px dashed #cbd5e1;border-radius:12px;")
+            self.flash_panel.setStyleSheet("background:#fff3b0;color:#7c5b00;border-radius:8px;font-weight:800;")
+
+    def on_theme_changed(self, value):
+        self.settings["theme"] = value
+        self.save_settings()
+        self.apply_theme()
+
+    def set_secondary_controls(self, enabled):
+        self.settings["secondary_controls"] = enabled
+        for control in self.secondary_controls:
+            control.setVisible(enabled)
+        self.save_settings()
+
+    def set_history_enabled(self, enabled):
+        self.history_enabled = enabled
+        self.settings["history_enabled"] = enabled
+        self.tabs.setTabVisible(2, enabled)
+        self.save_settings()
+        if enabled:
+            self.history = self.load_history()
+            self.refresh_history()
+
+    def update_input_count(self):
+        if hasattr(self, "input_count"):
+            self.input_count.setText(f"{len(self.gen_text.toPlainText()):,} characters")
+
+    def load_generator_file(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load generator text", "", "Text files (*.txt *.text);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            file_path = Path(path)
+            size = file_path.stat().st_size
+            if size > MAX_TEXT_FILE_BYTES:
+                QMessageBox.warning(
+                    self, "Text file too large",
+                    f"CodeEye imports text files up to 1 MiB. This file is {size / 1024 / 1024:.2f} MiB. "
+                    "Please split it into smaller files."
+                )
+                return
+            text = file_path.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError) as exc:
+            QMessageBox.warning(self, "Could not load text file", f"Use a UTF-8 text file.\n{exc}")
+            return
+        self.gen_text.setPlainText(text)
+        self.status.setText(f"Loaded text from {file_path.name}")
 
     def toggle_camera(self):
         if self.cap is not None:
@@ -407,7 +565,7 @@ class MainWindow(QMainWindow):
         self.result_box.setPlainText("\n\n".join(lines))
 
     def generate_code(self):
-        data = self.gen_text.text().strip()
+        data = self.gen_text.toPlainText().strip()
         if not data:
             QMessageBox.information(self, "Missing content", "Enter some text or data first.")
             return
@@ -463,6 +621,8 @@ class MainWindow(QMainWindow):
             return []
 
     def add_history(self, action, fmt, data):
+        if not self.history_enabled:
+            return
         self.history.insert(0, {"time": datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S"),
                                 "action": action, "format": fmt, "data": data})
         self.history = self.history[:500]
@@ -492,7 +652,10 @@ class MainWindow(QMainWindow):
         if answer == QMessageBox.StandardButton.Yes:
             self.history = []
             self.seen.clear()
-            HISTORY_FILE.write_text("[]", encoding="utf-8")
+            try:
+                HISTORY_FILE.write_text("[]", encoding="utf-8")
+            except OSError as exc:
+                QMessageBox.warning(self, "Could not clear history", str(exc))
             self.refresh_history()
 
     def closeEvent(self, event):
