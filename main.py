@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CodeEye — Scan & Generate")
-        self.resize(1040, 620)
+        self.resize(950, 620)
         self.cap = None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_frame)
