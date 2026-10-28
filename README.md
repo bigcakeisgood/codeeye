@@ -11,7 +11,9 @@ A desktop webcam barcode scanner and code generator built with Python and PyQt6.
 - Scan barcode images from disk.
 - Generate QR codes with L/M/Q/H error correction, configurable quiet zone, module size, and foreground/background colors.
 - Generate Code 128, Code 39, EAN-13, EAN-8, and ITF linear barcodes.
-- Local scan/generation history stored in `~/.codeeye/history.json`; double-click a history entry to copy its data.
+- Settings for Light, Dark, or Follow system appearance; optional in-app minimize/maximize/restore/close controls; and an on/off switch for local history.
+- Load generator input from a UTF-8 text file instead of typing it manually. Imports are limited to 1 MiB per file; QR and linear barcode formats have their own smaller data limits.
+- Local scan/generation history stored in `~/.codeeye/history.json`; settings are stored in `~/.codeeye/settings.json`. Double-click a history entry to copy its data.
 
 ## Install and run
 
@@ -54,6 +56,17 @@ The build output is placed under `dist/` (normally `dist/main.dist/`). Launch th
 ```
 
 If the executable has a different name, check the contents of `dist/`. The standalone output is a directory containing the executable and required runtime files; distribute the whole directory, not just the executable. Test webcam permissions and scanning on the target machine. This script has been added to the repository, but its output has not been built or runtime-tested in this environment.
+
+## Build a Windows executable with Nuitka
+
+Build on Windows. Install Python 3.10+ and Visual Studio Build Tools with the **Desktop development with C++** workload (including a supported MSVC compiler). Open PowerShell in the repository directory and run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\build_windows.ps1
+```
+
+The script creates/uses `.venv`, installs requirements and Nuitka, and builds a standalone app under `dist\main.dist\CodeEye.exe` (the exact output directory can vary by Nuitka version). Distribute the entire `main.dist` directory, not only the EXE. Build on Windows for Windows; a Linux build cannot be used as a Windows executable. The script is committed but has not been built or runtime-tested in this environment.
 
 ## Notes
 
