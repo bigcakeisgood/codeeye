@@ -861,7 +861,8 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("CodeEye")
     window = MainWindow()
-    window.show()
+    # Start maximized while preserving the normal title bar and desktop controls.
+    window.showMaximized()
     sys.exit(app.exec())
 
 
