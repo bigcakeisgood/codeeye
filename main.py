@@ -67,7 +67,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("CodeEye — Scan & Generate")
-        self.resize(1120, 760)
+        self.resize(1040, 680)
         self.cap = None
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_frame)
@@ -266,7 +266,7 @@ class MainWindow(QMainWindow):
         note = QLabel(
             "QR capacity depends on data and error correction (up to about 2,953 bytes in byte mode "
             "at level L). Any file type can be encoded as a set of QR images, then reassembled by "
-            "scanning those images in CodeEye. File bundles are limited to 50 MiB; each QR carries "
+            "scanning those images in CodeEye. File bundles are limited to 10 MiB; each QR carries "
             "a small chunk, so large files produce many codes. Ordinary single QR/text and linear "
             "barcodes still have much smaller format-specific limits."
         )
@@ -854,8 +854,8 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("CodeEye")
     window = MainWindow()
-    # Start maximized while preserving the normal title bar and desktop controls.
-    window.showMaximized()
+    # Start at a compact size that fits comfortably on 1366×768 displays.
+    window.show()
     sys.exit(app.exec())
 
 
