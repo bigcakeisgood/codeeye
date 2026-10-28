@@ -12,7 +12,7 @@ A desktop webcam barcode scanner and code generator built with Python and PyQt6.
 - Generate QR codes with L/M/Q/H error correction, configurable quiet zone, module size, and foreground/background colors.
 - Generate Code 128, Code 39, EAN-13, EAN-8, and ITF linear barcodes.
 - Settings for Light, Dark, or Follow system appearance; optional in-app minimize/maximize/restore/close controls; and an on/off switch for local history.
-- Load generator input from a UTF-8 text file instead of typing it manually. Imports are limited to 1 MiB per file; QR and linear barcode formats have their own smaller data limits.
+- Load generator input from a UTF-8 text file, or encode any file type (images, PDFs, documents, archives, audio, etc.) as a multi-QR file set. File sets are limited to 10 MiB and exported as a ZIP of QR PNGs; extract it and select every QR image in CodeEye to reassemble and checksum-verify the original file. Text imports are limited to 1 MiB. Single QR codes and linear barcodes still have format-specific capacity limits.
 - Local scan/generation history stored in `~/.codeeye/history.json`; settings are stored in `~/.codeeye/settings.json`. Double-click a history entry to copy its data.
 
 ## Install and run
