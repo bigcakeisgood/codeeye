@@ -1,6 +1,11 @@
 """CodeEye: webcam barcode scanner and code generator."""
+import base64
+import binascii
+import hashlib
+import io
 import json
 import sys
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -22,7 +27,9 @@ APP_DIR = Path.home() / ".codeeye"
 HISTORY_FILE = APP_DIR / "history.json"
 SETTINGS_FILE = APP_DIR / "settings.json"
 APP_DIR.mkdir(parents=True, exist_ok=True)
-MAX_TEXT_FILE_BYTES = 1 * 1024 * 1024  # 1 MiB import guard
+MAX_TEXT_FILE_BYTES = 1 * 1024 * 1024  # 1 MiB text import guard
+MAX_BINARY_FILE_BYTES = 50 * 1024 * 1024  # 50 MiB file-to-QR bundle guard
+QR_FILE_CHUNK_BYTES = 700  # keep each base64 payload comfortably within QR capacity
 
 
 class VideoLabel(QLabel):
@@ -231,6 +238,14 @@ class MainWindow(QMainWindow):
         self.input_count.setStyleSheet("color:#64748b;")
         file_row.addWidget(self.input_count)
         form.addRow("Text file", file_row)
+        file_buttons = QHBoxLayout()
+        encode_file_btn = QPushButton("Encode any file as QR set…")
+        encode_file_btn.clicked.connect(self.encode_file_as_qr_set)
+        file_buttons.addWidget(encode_file_btn)
+        decode_file_btn = QPushButton("Reassemble QR file set…")
+        decode_file_btn.clicked.connect(self.reassemble_qr_file_set)
+        file_buttons.addWidget(decode_file_btn)
+        form.addRow("Any file", file_buttons)
         self.ec_level = QComboBox()
         self.ec_level.addItems(["L — 7%", "M — 15%", "Q — 25%", "H — 30%"])
         form.addRow("QR error correction", self.ec_level)
@@ -256,10 +271,11 @@ class MainWindow(QMainWindow):
         controls.addWidget(save)
         controls.addStretch()
         note = QLabel(
-            "QR capacity depends on content and error correction (up to about 7,089 digits, "
-            "4,296 alphanumeric characters, or 2,953 bytes at level L). Unicode and mixed text "
-            "often fit less. Imported .txt files are limited to 1 MiB; the selected code format "
-            "may have a much smaller capacity. If generation fails, shorten the content."
+            "QR capacity depends on data and error correction (up to about 2,953 bytes in byte mode "
+            "at level L). Any file type can be encoded as a set of QR images, then reassembled by "
+            "scanning those images in CodeEye. File bundles are limited to 50 MiB; each QR carries "
+            "a small chunk, so large files produce many codes. Ordinary single QR/text and linear "
+            "barcodes still have much smaller format-specific limits."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color:#64748b;")
@@ -416,6 +432,174 @@ class MainWindow(QMainWindow):
     def update_input_count(self):
         if hasattr(self, "input_count"):
             self.input_count.setText(f"{len(self.gen_text.toPlainText()):,} characters")
+
+    def encode_file_as_qr_set(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Choose any file to encode")
+        if not path:
+            return
+        file_path = Path(path)
+        try:
+            if file_path.stat().st_size > MAX_BINARY_FILE_BYTES:
+                QMessageBox.warning(
+                    self, "File too large",
+                    "CodeEye currently supports files up to 50 MiB for multi-QR encoding. "
+                    "Split larger files into smaller files first."
+                )
+                return
+            raw = file_path.read_bytes()
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not read file", str(exc))
+            return
+        if not raw:
+            QMessageBox.information(self, "Empty file", "Empty files cannot be encoded as QR sets.")
+            return
+        name_encoded = base64.urlsafe_b64encode(file_path.name.encode("utf-8")).decode("ascii")
+        digest = hashlib.sha256(raw).hexdigest()
+        chunks = [raw[i:i + QR_FILE_CHUNK_BYTES] for i in range(0, len(raw), QR_FILE_CHUNK_BYTES)]
+        total = len(chunks)
+        answer = QMessageBox.question(
+            self, "Create multi-QR file set",
+            f"File: {file_path.name}\nSize: {len(raw):,} bytes\nQR images: {total:,}\n\n"
+            "Create a ZIP containing the QR images? To restore the file, import all those images "
+            "using “Reassemble QR file set”."
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        bundle = io.BytesIO()
+        try:
+            with zipfile.ZipFile(bundle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                manifest = {
+                    "format": "CodeEye multi-QR file set v1",
+                    "filename": file_path.name,
+                    "size_bytes": len(raw),
+                    "sha256": digest,
+                    "qr_count": total,
+                    "chunk_bytes": QR_FILE_CHUNK_BYTES,
+                }
+                archive.writestr("manifest.json", json.dumps(manifest, indent=2))
+                for index, chunk in enumerate(chunks, start=1):
+                    payload = (
+                        f"CODEEYEFILE1|{name_encoded}|{digest}|{index}|{total}|"
+                        f"{base64.b64encode(chunk).decode('ascii')}"
+                    )
+                    qr = qrcode.QRCode(
+                        version=None,
+                        error_correction=qrcode.constants.ERROR_CORRECT_L,
+                        box_size=self.box_size.value(),
+                        border=max(4, self.quiet_zone.value()),
+                    )
+                    qr.add_data(payload)
+                    qr.make(fit=True)
+                    image = qr.make_image(fill_color=self.foreground.text(), back_color=self.background.text()).convert("RGB")
+                    image_bytes = io.BytesIO()
+                    image.save(image_bytes, format="PNG")
+                    archive.writestr(f"qr_{index:05d}_of_{total:05d}.png", image_bytes.getvalue())
+        except Exception as exc:
+            QMessageBox.warning(self, "Could not encode file", str(exc))
+            return
+        output, _ = QFileDialog.getSaveFileName(
+            self, "Save QR file set", f"{file_path.name}.codeeye-qr.zip", "ZIP archive (*.zip)"
+        )
+        if not output:
+            return
+        if not output.lower().endswith(".zip"):
+            output += ".zip"
+        try:
+            Path(output).write_bytes(bundle.getvalue())
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not save QR file set", str(exc))
+            return
+        first_payload = (
+            f"CODEEYEFILE1|{name_encoded}|{digest}|1|{total}|"
+            f"{base64.b64encode(chunks[0]).decode('ascii')}"
+        )
+        preview_qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_L,
+                                   box_size=self.box_size.value(), border=max(4, self.quiet_zone.value()))
+        preview_qr.add_data(first_payload)
+        preview_qr.make(fit=True)
+        self.generated_image = preview_qr.make_image(
+            fill_color=self.foreground.text(), back_color=self.background.text()
+        ).convert("RGB")
+        self.generated_preview.setPixmap(QPixmap.fromImage(ImageQt.ImageQt(self.generated_image)).scaled(
+            self.generated_preview.size(), Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation))
+        self.status.setText(f"Encoded {file_path.name} into {total} QR images")
+        self.add_history("Encode file QR set", "QR Code", f"{file_path.name} ({len(raw)} bytes; {total} QR images)")
+        QMessageBox.information(
+            self, "QR file set created",
+            f"Saved {total:,} QR images in the ZIP archive. Keep every image in the set. "
+            "To restore the original, extract the ZIP and select all QR PNGs in "
+            "“Reassemble QR file set”."
+        )
+
+    def reassemble_qr_file_set(self):
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select all QR images from the extracted file set", "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.webp)"
+        )
+        if not paths:
+            return
+        chunks = {}
+        expected_total = None
+        expected_digest = None
+        filename = None
+        for path in paths:
+            image = cv2.imread(path)
+            if image is None:
+                continue
+            try:
+                results = zxingcpp.read_barcodes(image)
+            except Exception:
+                continue
+            for result in results:
+                if not result.valid or not result.text.startswith("CODEEYEFILE1|"):
+                    continue
+                try:
+                    marker, encoded_name, digest, index_text, total_text, encoded_chunk = result.text.split("|", 5)
+                    this_total = int(total_text)
+                    this_index = int(index_text)
+                    this_name = base64.urlsafe_b64decode(encoded_name.encode("ascii")).decode("utf-8")
+                    chunk = base64.b64decode(encoded_chunk.encode("ascii"), validate=True)
+                    if not 1 <= this_index <= this_total or this_total > 100000:
+                        continue
+                    if expected_total is not None and (
+                        expected_total != this_total or expected_digest != digest or filename != this_name
+                    ):
+                        QMessageBox.warning(self, "Mixed QR sets", "Selected images contain more than one file set.")
+                        return
+                    expected_total, expected_digest, filename = this_total, digest, this_name
+                    chunks[this_index] = chunk
+                except (ValueError, UnicodeError, binascii.Error):
+                    continue
+        if not chunks or expected_total is None:
+            QMessageBox.information(
+                self, "No CodeEye file QR set found",
+                "Select the QR PNG images created by CodeEye's multi-QR file encoder."
+            )
+            return
+        missing = sorted(set(range(1, expected_total + 1)) - set(chunks))
+        if missing:
+            preview = ", ".join(str(n) for n in missing[:20])
+            QMessageBox.warning(
+                self, "QR images missing",
+                f"Found {len(chunks)} of {expected_total} required QR images. Missing parts: {preview}"
+                + ("…" if len(missing) > 20 else "") + ". Select every QR image and try again."
+            )
+            return
+        raw = b"".join(chunks[i] for i in range(1, expected_total + 1))
+        if hashlib.sha256(raw).hexdigest() != expected_digest:
+            QMessageBox.warning(self, "File verification failed", "The assembled data does not match its SHA-256 checksum.")
+            return
+        output, _ = QFileDialog.getSaveFileName(self, "Save restored file", filename, "All files (*)")
+        if not output:
+            return
+        try:
+            Path(output).write_bytes(raw)
+        except OSError as exc:
+            QMessageBox.warning(self, "Could not save restored file", str(exc))
+            return
+        self.status.setText(f"Restored {Path(output).name}")
+        QMessageBox.information(self, "File restored", f"Restored and verified {Path(output).name} ({len(raw):,} bytes).")
 
     def load_generator_file(self):
         path, _ = QFileDialog.getOpenFileName(
