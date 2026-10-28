@@ -80,6 +80,10 @@ class MainWindow(QMainWindow):
         self.history = self.load_history()
         self.build_ui()
         self.apply_theme()
+        try:
+            QApplication.styleHints().colorSchemeChanged.connect(self.on_system_color_scheme_changed)
+        except AttributeError:
+            pass
         self.refresh_history()
 
     def build_ui(self):
@@ -384,6 +388,10 @@ class MainWindow(QMainWindow):
             self.video.setStyleSheet("background:#111827;color:#9ca3af;border-radius:12px;")
             self.generated_preview.setStyleSheet("background:white;border:1px dashed #cbd5e1;border-radius:12px;")
             self.flash_panel.setStyleSheet("background:#fff3b0;color:#7c5b00;border-radius:8px;font-weight:800;")
+
+    def on_system_color_scheme_changed(self, scheme):
+        if self.settings.get("theme", "Follow system") == "Follow system":
+            self.apply_theme()
 
     def on_theme_changed(self, value):
         self.settings["theme"] = value
