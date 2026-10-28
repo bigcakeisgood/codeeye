@@ -28,8 +28,8 @@ HISTORY_FILE = APP_DIR / "history.json"
 SETTINGS_FILE = APP_DIR / "settings.json"
 APP_DIR.mkdir(parents=True, exist_ok=True)
 MAX_TEXT_FILE_BYTES = 1 * 1024 * 1024  # 1 MiB text import guard
-MAX_BINARY_FILE_BYTES = 50 * 1024 * 1024  # 50 MiB file-to-QR bundle guard
-QR_FILE_CHUNK_BYTES = 700  # keep each base64 payload comfortably within QR capacity
+MAX_BINARY_FILE_BYTES = 10 * 1024 * 1024  # 10 MiB file-to-QR bundle guard
+QR_FILE_CHUNK_BYTES = 1600  # base64 payload plus metadata fits a large QR at level L
 
 
 class VideoLabel(QLabel):
@@ -442,7 +442,7 @@ class MainWindow(QMainWindow):
             if file_path.stat().st_size > MAX_BINARY_FILE_BYTES:
                 QMessageBox.warning(
                     self, "File too large",
-                    "CodeEye currently supports files up to 50 MiB for multi-QR encoding. "
+                    "CodeEye currently supports files up to 10 MiB for multi-QR encoding. "
                     "Split larger files into smaller files first."
                 )
                 return
